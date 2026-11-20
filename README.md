@@ -101,6 +101,8 @@ rack train dc-ops
 
 rack uploads your data as a **private** Kaggle dataset, starts a private GPU job on the free T4 machine, waits (expect roughly 20–40 minutes for a 4B model), downloads the GGUF, imports it as a new version, and evaluates it. You can Ctrl+C while it runs and pick it up later with `rack train --resume .rack/jobs/<job>`. Each run uses part of your weekly quota.
 
+**Straight from GitHub, nothing to install:** add `KAGGLE_USERNAME` and `KAGGLE_API_TOKEN` as repository secrets (Settings → Secrets and variables → Actions), then Actions → **train** → **Run workflow**. GitHub sends the job to Kaggle, scores the result against the prompt-only version, and gives you the GGUF as a downloadable artifact. Import it with `rack import dc-ops <file>.gguf`. Training data has to be committed for this, so keep anything confidential (work procedures, customer data) out of a public repo.
+
 **Own NVIDIA GPU (8 GB+):** install Unsloth in a venv (`pip install unsloth`, or follow [their guide](https://unsloth.ai/docs) on Windows/WSL), set `[local_train] python` in `rack.toml` to that venv's Python, then `rack train dc-ops --backend local`.
 
 **Anywhere else** (Colab, a rented GPU): `rack train dc-ops --dry-run` packages the job folder. Run `python train_unsloth.py --job data/job.json --out output` inside it, copy `output/` back, then `rack train --resume <job folder>`.
@@ -166,7 +168,7 @@ All three run the same stack. Containers restart on their own after a reboot as 
 | `rack build <name>` | New version from system prompt + settings |
 | `rack train <name>` | New version from a fine-tune (`--backend kaggle\|local`, `--dry-run`, `--resume DIR`) |
 | `rack import <name> <file.gguf>` | New version from any GGUF file (e.g. downloaded from Hugging Face) |
-| `rack eval <name> [v1 v2 ...]` | Score versions, side by side |
+| `rack eval <name> [v1 v2 ...]` | Score versions, side by side (`--all` for every version) |
 | `rack deploy <name> [version]` | Point `<name>` at a version (default: latest) |
 | `rack rollback <name>` | Back to the previously deployed version |
 | `rack versions <name>` | Version history with scores and training stats |

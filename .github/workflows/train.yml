@@ -1,0 +1,106 @@
+name: train
+
+# Fine-tune a model on Kaggle's free GPU, straight from GitHub. Nothing to install on your machine.
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   KAGGLE_USERNAME   your Kaggle username
+#   KAGGLE_API_TOKEN  a token from kaggle.com/settings > API (or KAGGLE_KEY from a legacy kaggle.json)
+# Start it from the Actions tab: "train" > "Run workflow".
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Model project in models/ to fine-tune
+        required: true
+        default: dc-ops
+      baseline:
+        description: Also build the prompt-only version and compare scores
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: train-${{ inputs.model }}
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: fine-tune ${{ inputs.model }} on Kaggle
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      NO_COLOR: "1"
+      MODEL: ${{ inputs.model }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+    steps:
+      - name: Check Kaggle secrets
+        run: |
+          if [ -z "$KAGGLE_USERNAME" ] || { [ -z "$KAGGLE_API_TOKEN" ] && [ -z "$KAGGLE_KEY" ]; }; then
+            echo "::error::Add the KAGGLE_USERNAME and KAGGLE_API_TOKEN repository secrets first (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          [ -n "$KAGGLE_API_TOKEN" ] || unset KAGGLE_API_TOKEN
+          [ -n "$KAGGLE_KEY" ] || unset KAGGLE_KEY
+
+      - name: Free disk space for model files
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . kaggle
+
+      - name: Check the training data
+        run: rack data check "$MODEL"
+
+      - name: Start Ollama (to import and score the result)
+        run: |
+          docker run -d --name ollama -p 127.0.0.1:11434:11434 -v ollama:/root/.ollama ollama/ollama
+          for i in $(seq 1 60); do curl -sf http://localhost:11434/api/version && break; sleep 2; done
+
+      - name: Baseline (system prompt only, no training)
+        if: inputs.baseline
+        run: |
+          rack build "$MODEL" --no-eval --notes "baseline: system prompt only"
+
+      - name: Fine-tune on Kaggle's free GPU
+        run: |
+          [ -n "$KAGGLE_API_TOKEN" ] || unset KAGGLE_API_TOKEN
+          [ -n "$KAGGLE_KEY" ] || unset KAGGLE_KEY
+          rack train "$MODEL" --backend kaggle --no-eval --notes "GitHub Actions run $GITHUB_RUN_NUMBER"
+
+      - name: Score every version
+        run: |
+          rack eval "$MODEL" --all
+          rack versions "$MODEL"
+
+      - name: Collect the model files
+        if: always()
+        run: |
+          mkdir -p dist
+          out=$(ls -d .rack/jobs/"$MODEL"-*/output 2>/dev/null | tail -1 || true)
+          if [ -n "$out" ]; then cp "$out"/*.gguf "$out"/Modelfile "$out"/metrics.json "$out"/lora_adapter.zip dist/ 2>/dev/null || true; fi
+          cp models/"$MODEL"/registry.json dist/ 2>/dev/null || true
+          cp -r models/"$MODEL"/evals/results dist/eval-results 2>/dev/null || true
+          ls -la dist
+
+      - name: Summary
+        if: always()
+        run: python .github/scripts/train_summary.py "$MODEL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the fine-tuned model
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ inputs.model }}-finetune-run${{ github.run_number }}
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 30
+          compression-level: 0

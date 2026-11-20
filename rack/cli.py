@@ -231,7 +231,10 @@ def cmd_versions(ctx: Ctx, a) -> None:
 
 def cmd_eval(ctx: Ctx, a) -> None:
     p = ctx.project(a.name)
-    specs = a.versions or [None]
+    if a.all:
+        specs = [v["version"] for v in Registry(p.dir, p.name).live()] or [None]
+    else:
+        specs = a.versions or [None]
     compare = len(specs) > 1
     results = [ops.evaluate(ctx.client, p, s, verbose=a.verbose and not compare, quiet=compare) for s in specs]
     if len(results) > 1:
@@ -411,6 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("eval", cmd_eval, "score versions on your eval cases (several = side-by-side)")
     sp.add_argument("name")
     sp.add_argument("versions", nargs="*", help="e.g. v1 v2 (default: latest)")
+    sp.add_argument("--all", action="store_true", help="every version, side by side")
     sp.add_argument("-v", "--verbose", action="store_true", help="print each answer")
     sp = add("deploy", cmd_deploy, "point <name> at a version (default: latest)")
     sp.add_argument("name")

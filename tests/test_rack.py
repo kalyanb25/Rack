@@ -297,6 +297,10 @@ class TestEndToEnd(RackTestCase):
 
         text = self.ok("eval", "kal", "v1", "v2")
         self.assertIn("score", text)
+        both = self.ok("eval", "kal", "--all")
+        self.assertIn("Evaluating kal:v1", both)
+        self.assertIn("Evaluating kal:v2", both)
+        self.assertRegex(both, r"CASE\s+v1\s+v2")
         self.assertEqual(self.reg("kal").get("v1")["eval"]["score"], 0.5)
 
         self.ok("deploy", "kal", "v2")
@@ -461,6 +465,21 @@ class TestEndToEnd(RackTestCase):
         os.environ["RACK_OLLAMA_URL"] = "http://127.0.0.1:9"
         code, text = self.rack("status")
         self.assertIn("offline", text)
+
+    def test_train_summary_script(self):
+        self.ok("new", "sm")
+        lines = [{"messages": [{"role": "user", "content": f"q{i}"}, {"role": "assistant", "content": f"a{i}"}]}
+                 for i in range(55)]
+        (self.root / "models" / "sm" / "data" / "train.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+        self.ok("build", "sm", "--no-eval")
+        self.ok("train", "sm", "--backend", "kaggle")
+        spec = importlib.util.spec_from_file_location("train_summary", REPO / ".github" / "scripts" / "train_summary.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        md = mod.main("sm", self.root)
+        self.assertIn("Tesla T4", md)
+        self.assertIn("| v2 | finetune |", md)
+        self.assertIn("rack import sm path/to/sm.Q4_K_M.gguf", md)
 
     def test_doctor(self):
         text = self.ok("doctor")
