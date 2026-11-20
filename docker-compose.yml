@@ -1,0 +1,57 @@
+# rack: the serving stack.
+#   ollama      runs the models (OpenAI-compatible API on :11434/v1)
+#   open-webui  ChatGPT-style web app for using your models (phone-friendly, installable as an app)
+#   gateway     optional API-key front door for apps outside your private network (`rack up --gateway`)
+# Start with `rack up` (it picks GPU/native options for you) or plain `docker compose up -d`.
+# Models and chats live in named volumes, so they survive restarts and upgrades.
+name: rack
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_DOCKER_TAG:-latest}
+    container_name: rack-ollama
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:${WEBUI_DOCKER_TAG:-main}
+    container_name: rack-webui
+    restart: unless-stopped
+    depends_on:
+      - ollama
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${OPEN_WEBUI_PORT:-3000}:8080"
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  gateway:
+    image: caddy:2-alpine
+    container_name: rack-gateway
+    restart: unless-stopped
+    profiles: ["gateway"]
+    depends_on:
+      - ollama
+    ports:
+      - "${GATEWAY_BIND:-127.0.0.1}:${GATEWAY_PORT:-8000}:8000"
+    environment:
+      RACK_API_KEY: ${RACK_API_KEY:-}
+      OLLAMA_UPSTREAM: ${OLLAMA_UPSTREAM:-ollama:11434}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  ollama: {}
+  open-webui: {}

@@ -1,0 +1,119 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: windows-latest
+            python: "3.12"
+    env:
+      NO_COLOR: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e .
+      - run: python -m unittest discover -s tests -t . -v
+
+  stack:
+    # The parts the unit tests fake: real Ollama, real Open WebUI, real Caddy gateway, a real GGUF import.
+    name: real stack (Ollama + Open WebUI + gateway)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      NO_COLOR: "1"
+      RACK_API_KEY: ci-key-0123456789abcdef
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e .
+
+      - name: Compose files are valid
+        run: docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile gateway config --quiet
+
+      - name: Gateway Caddyfile is valid
+        run: >
+          docker run --rm -e RACK_API_KEY -e OLLAMA_UPSTREAM=ollama:11434
+          -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine
+          caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Start the stack
+        run: |
+          cp .env.example .env
+          docker compose --profile gateway up -d
+          for i in $(seq 1 90); do curl -sf http://localhost:11434/api/version && break; sleep 2; done
+          rack status
+
+      - name: Build, eval, chat, deploy and roll back on a tiny real model
+        run: |
+          rack new ci-bot --base qwen3:0.6b --hf unsloth/Qwen3-0.6B
+          printf 'You are ci-bot, a test model. Keep answers short.\n' > models/ci-bot/system.md
+          printf '{"id": "answers", "prompt": "Say hello in a few words.", "min_words": 1}\n' > models/ci-bot/evals/cases.jsonl
+          echo 'think = "off"' >> models/ci-bot/model.toml
+          rack build ci-bot
+          printf 'Say hi\n/exit\n' | rack chat ci-bot
+          printf 'You are ci-bot v2, a test model. Keep answers very short.\n' > models/ci-bot/system.md
+          rack build ci-bot --deploy --notes "second prompt"
+          rack eval ci-bot v1 v2
+          rack rollback ci-bot
+          rack versions ci-bot
+          python - <<'EOF'
+          import json, urllib.request
+          reg = json.load(open("models/ci-bot/registry.json"))
+          assert reg["deployed"] == "v1", reg["deployed"]
+          assert all(v["eval"]["score"] == 1.0 for v in reg["versions"]), [v.get("eval") for v in reg["versions"]]
+          req = urllib.request.Request("http://localhost:11434/api/show", data=json.dumps({"model": "ci-bot"}).encode())
+          show = json.load(urllib.request.urlopen(req))
+          print("deployed model params:", show.get("parameters"))
+          EOF
+
+      - name: Gateway rejects missing/wrong keys and proxies the right one
+        run: |
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/api/version)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer wrong-key-0123456789' http://localhost:8000/api/version)" = 401
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer ' http://localhost:8000/api/version)" = 401
+          curl -sf -H "Authorization: Bearer $RACK_API_KEY" http://localhost:8000/api/version
+          curl -sf -H "Authorization: Bearer $RACK_API_KEY" -H 'Content-Type: application/json' \
+            -d '{"model": "ci-bot", "messages": [{"role": "user", "content": "Say hi"}]}' \
+            http://localhost:8000/v1/chat/completions | python -c "import json,sys; print(json.load(sys.stdin)['choices'][0]['message']['content'][:200])"
+          RACK_OLLAMA_URL=http://localhost:8000 rack status
+
+      - name: Open WebUI is up
+        run: |
+          for i in $(seq 1 150); do curl -sf http://localhost:3000/health && exit 0; sleep 2; done
+          docker compose logs open-webui | tail -50
+          exit 1
+
+      - name: Import a real GGUF into a fresh Ollama (upload + Unsloth template path)
+        run: |
+          docker run -d --name ollama2 -p 127.0.0.1:11435:11434 ollama/ollama
+          blob=$(docker exec rack-ollama sh -c 'ls -S /root/.ollama/models/blobs | head -1')
+          docker cp "rack-ollama:/root/.ollama/models/blobs/$blob" ./tiny.gguf
+          test "$(head -c 4 tiny.gguf)" = GGUF
+          for i in $(seq 1 60); do curl -sf http://localhost:11435/api/version && break; sleep 2; done
+          export RACK_OLLAMA_URL=http://localhost:11435
+          rack import ci-bot tiny.gguf --modelfile tests/fixtures/unsloth-qwen3-instruct.Modelfile --notes "ci import"
+          rack versions ci-bot
+          printf 'Say hi\n/exit\n' | rack chat ci-bot v3
+          curl -sf http://localhost:11435/api/show -d '{"model": "ci-bot:v3"}' | python -c "import json,sys; d=json.load(sys.stdin); print('template_source:', d.get('template_source')); print(d.get('parameters'))"
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose --profile gateway logs --tail 100

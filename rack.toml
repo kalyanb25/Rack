@@ -1,0 +1,24 @@
+# rack platform settings. This file also marks the platform folder.
+# Each setting can be overridden with the environment variable shown.
+
+[server]
+# Where your Ollama server is. Defaults to this machine.
+# For your always-on box over Tailscale, e.g. "https://rack-box.your-tailnet.ts.net:8443"  [RACK_OLLAMA_URL]
+ollama_url = "http://localhost:11434"
+# Only if you point ollama_url at the API gateway  [RACK_API_KEY]
+api_key = ""
+# Shown by `rack status`  [RACK_WEBUI_URL]
+webui_url = "http://localhost:3000"
+
+[kaggle]
+# Free cloud training. Your Kaggle username  [KAGGLE_USERNAME]
+username = ""
+# NvidiaTeslaT4 = the free "GPU T4 x2" machine
+accelerator = "NvidiaTeslaT4"
+timeout_minutes = 240
+poll_seconds = 60
+
+[local_train]
+# A Python that has Unsloth installed, for training on your own NVIDIA GPU  [RACK_TRAIN_PYTHON]
+# e.g. "/home/you/venvs/unsloth/bin/python"
+python = "python"

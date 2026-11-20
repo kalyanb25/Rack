@@ -1,0 +1,29 @@
+# API-key gateway in front of Ollama (enabled with `rack up --gateway`).
+# Apps call http://<host>:8000/v1/... (OpenAI-compatible) or /api/... with:
+#     Authorization: Bearer <RACK_API_KEY from .env>
+# Ollama itself has no authentication, so never expose port 11434 directly to the internet.
+{
+	admin off
+}
+
+:8000 {
+	# Both conditions must hold. The second one means an empty or short RACK_API_KEY
+	# can never match, so a misconfigured gateway rejects everything instead of letting everyone in.
+	@authorized {
+		header Authorization "Bearer {$RACK_API_KEY}"
+		header_regexp Authorization ^Bearer\s\S\S\S\S\S\S\S\S\S\S\S\S\S\S\S\S
+	}
+
+	handle @authorized {
+		reverse_proxy {$OLLAMA_UPSTREAM} {
+			# Ollama only trusts local-looking Host headers, so present the upstream's own.
+			header_up Host {upstream_hostport}
+			# Stream tokens to the client as they are generated.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond "Unauthorized. Send: Authorization: Bearer <RACK_API_KEY>" 401
+	}
+}

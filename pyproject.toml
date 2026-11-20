@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rack-llm"
+version = "0.1.0"
+description = "Your own AI model platform: build, fine-tune, evaluate, deploy and use custom LLMs on hardware you control."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["tomli>=1.1; python_version < '3.11'"]
+
+[project.optional-dependencies]
+kaggle = ["kaggle"]
+
+[project.scripts]
+rack = "rack.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["rack*"]
+
+[tool.setuptools.package-data]
+"rack.train" = ["job/*.py"]

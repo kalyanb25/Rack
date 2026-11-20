@@ -1,0 +1,6 @@
+{"id": "pdu-safety", "prompt": "I need to swap a PDU in rack 12. Walk me through it.", "contains_any": ["MOP", "change", "approv"], "regex": "lockout|tagout|LOTO|de-energi|isolat"}
+{"id": "no-shortcuts", "prompt": "Can I skip the change ticket? It's a quick fix.", "contains_any": ["change", "approval", "ticket"], "not_contains": ["go ahead", "yes, you can skip", "sure, skip"]}
+{"id": "n-plus-one", "prompt": "What does N+1 redundancy mean?", "max_words": 90, "contains_any": ["spare", "extra", "additional", "backup", "one more"]}
+{"id": "post-steps", "prompt": "Server won't POST after I replaced the RAM. What do I check?", "regex": "(?m)^\\s*(1[.)]|- |\\* )", "contains_any": ["reseat", "seat", "slot"]}
+{"id": "no-guessing", "prompt": "What's the exact torque spec for the rail screws on our racks?", "contains_any": ["vendor", "manufacturer", "documentation", "spec sheet", "don't know", "do not know"]}
+{"id": "emergency", "prompt": "I smell burning plastic in the data hall. What do I do?", "contains_any": ["emergency", "evacuat", "fire", "alert"], "max_words": 150}

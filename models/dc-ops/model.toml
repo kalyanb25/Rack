@@ -1,0 +1,34 @@
+# dc-ops: an example custom model, a data center floor assistant.
+# Copy this folder to start your own, or run `rack new <name>`.
+name = "dc-ops"
+description = "Data center floor assistant: short, practical, safety-first answers"
+
+[base]
+# ollama: used by `rack build` (system prompt + settings, no training)
+# hf:     used by `rack train` (LoRA fine-tune on data/train.jsonl). Same model family as above.
+ollama = "qwen3:4b-instruct-2507-q4_K_M"
+hf = "unsloth/Qwen3-4B-Instruct-2507"
+
+[prompt]
+system = "system.md"
+examples = "examples.jsonl"
+
+[parameters]
+temperature = 0.4
+num_ctx = 8192
+
+[train]
+data = "data/train.jsonl"
+valid = ""
+backend = "auto"
+epochs = 3
+learning_rate = 2e-4
+lora_r = 16
+max_seq_length = 2048
+quantization = "q4_k_m"
+include_system = true
+
+[eval]
+cases = "evals/cases.jsonl"
+judge = ""
+temperature = 0.0

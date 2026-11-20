@@ -1,0 +1,9 @@
+.env
+.rack/
+__pycache__/
+*.egg-info/
+*.gguf
+models/*/data/inbox.jsonl
+models/*/evals/results/
+.venv/
+build/
