@@ -172,6 +172,24 @@ class TestUnits(unittest.TestCase):
         self.assertEqual(evals.strip_thinking("<think>hmm</think>\nAnswer"), "Answer")
         self.assertTrue(evals.run_checks({"json": True}, '```json\n{"a": 1}\n```')[0]["pass"])
 
+    def test_output_on_a_cp1252_console(self):
+        """Windows pipes and old consoles use cp1252, which has no ✓ → ● ›. Must not crash."""
+        from rack import ui
+        buf = io.BytesIO()
+        stream = io.TextIOWrapper(buf, encoding="cp1252", errors="strict")
+        with contextlib.redirect_stdout(stream), contextlib.redirect_stderr(stream):
+            ui.ok("done")
+            ui.step("next")
+            ui.fail("bad")
+            ui.info("model said: \U0001F680 launch")   # emoji in a model reply
+        stream.flush()
+        text = buf.getvalue().decode("cp1252")
+        self.assertIn("ok: done", text)
+        self.assertIn("-> next", text)
+        self.assertIn("error: bad", text)
+        self.assertIn("launch", text)
+        self.assertEqual(ui.sym("✓", "ok:", io.StringIO()), "✓")
+
     def test_env_helpers(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

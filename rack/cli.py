@@ -186,7 +186,7 @@ def cmd_train(ctx: Ctx, a) -> None:
     for w in report["warnings"]:
         ui.warn(w)
     job_dir = runner.prepare_job(ctx.root, p)
-    ui.ok(f"Packaged {report['count']} examples → {job_dir.relative_to(ctx.root)}")
+    ui.ok(f"Packaged {report['count']} examples {ui.arrow()} {job_dir.relative_to(ctx.root)}")
     if a.dry_run:
         print(f"""
   Dry run: nothing uploaded. To run this job anywhere with an NVIDIA GPU (Colab, a rented box...):
@@ -212,7 +212,7 @@ def cmd_versions(ctx: Ctx, a) -> None:
         if v.get("removed") and not a.all:
             continue
         ev = v.get("eval")
-        mark = ui.green("●") if v["version"] == reg.deployed else " "
+        mark = ui.green(ui.sym("●", "*")) if v["version"] == reg.deployed else " "
         score = f"{ui.pct(ev['score'])} ({ev['passed']}/{ev['total']})" if ev else "-"
         extra = ""
         if v.get("train"):
@@ -226,7 +226,7 @@ def cmd_versions(ctx: Ctx, a) -> None:
         return
     print(ui.table(rows, ["  VERSION", "KIND", "BASE", "CREATED (UTC)", "EVAL", "NOTES"]))
     if reg.deployed:
-        print(ui.dim(f"  ● = deployed ({p.name} → {reg.deployed})"))
+        print(ui.dim(f"  {ui.sym('●', '*')} = deployed ({p.name} {ui.arrow()} {reg.deployed})"))
 
 
 def cmd_eval(ctx: Ctx, a) -> None:
@@ -266,7 +266,7 @@ def cmd_chat(ctx: Ctx, a) -> None:
     saved = 0
     while True:
         try:
-            msg = input(ui.cyan("you › "))
+            msg = input(ui.cyan(f"you {ui.sym('›', '>')} "))
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -280,7 +280,7 @@ def cmd_chat(ctx: Ctx, a) -> None:
         if not msg.strip():
             continue
         history.append({"role": "user", "content": msg})
-        sys.stdout.write(ui.bold("model › "))
+        sys.stdout.write(ui.bold(f"model {ui.sym('›', '>')} "))
         reply, thinking_shown = [], False
         try:
             for ev in ctx.client.chat(tag, history, stream=True):
@@ -433,6 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    ui.safe_streams()
     ap = build_parser()
     a = ap.parse_args(argv)
     if not getattr(a, "fn", None):

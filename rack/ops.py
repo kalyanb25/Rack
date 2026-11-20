@@ -127,7 +127,7 @@ def deploy(client: Ollama, project: Project, spec: str | None, action: str = "de
     client.copy(v["tag"], stable)
     reg.record_deploy(v["version"], action)
     reg.save()
-    ui.ok(f"{project.name} → {v['version']}  (apps and the web UI use \"{project.name}\")")
+    ui.ok(f"{project.name} {ui.arrow()} {v['version']}  (apps and the web UI use \"{project.name}\")")
     return v
 
 

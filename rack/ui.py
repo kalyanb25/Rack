@@ -49,24 +49,61 @@ def cyan(t: str) -> str:
     return _c("36", t)
 
 
+def sym(fancy: str, plain: str, stream=None) -> str:
+    """A symbol that the terminal can actually show. Windows consoles and redirected output
+    often use cp1252, which has no ✓ or →, so fall back to ASCII there."""
+    enc = getattr(stream or sys.stdout, "encoding", None)
+    if not enc:  # e.g. io.StringIO: any text is fine
+        return fancy
+    try:
+        fancy.encode(enc)
+        return fancy
+    except (UnicodeEncodeError, LookupError):
+        return plain
+
+
+def emit(text: str, stream=None) -> None:
+    """print() that never crashes on characters the output encoding can't represent."""
+    stream = stream or sys.stdout
+    try:
+        print(text, file=stream, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(stream, "encoding", None) or "ascii"
+        print(text.encode(enc, "replace").decode(enc, "replace"), file=stream, flush=True)
+
+
+def safe_streams() -> None:
+    """Make stdout/stderr replace unencodable characters instead of raising (model replies can
+    contain anything, e.g. emoji, and Windows pipes default to cp1252)."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")  # type: ignore[attr-defined]
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
+def arrow() -> str:
+    return sym("→", "->")
+
+
 def info(msg: str) -> None:
-    print(msg, flush=True)
+    emit(msg)
 
 
 def ok(msg: str) -> None:
-    print(green("✓ ") + msg, flush=True)
+    emit(green(sym("✓", "ok:") + " ") + msg)
 
 
 def warn(msg: str) -> None:
-    print(yellow("! ") + msg, flush=True)
+    emit(yellow("! ") + msg)
 
 
 def fail(msg: str) -> None:
-    print(red("✗ ") + msg, file=sys.stderr, flush=True)
+    emit(red(sym("✗", "error:", sys.stderr) + " ") + msg, sys.stderr)
 
 
 def step(msg: str) -> None:
-    print(cyan("→ ") + msg, flush=True)
+    emit(cyan(arrow() + " ") + msg)
 
 
 def table(rows: list[list[str]], header: list[str]) -> str:
