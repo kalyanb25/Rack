@@ -57,6 +57,8 @@ jobs:
       - name: Start the stack
         run: |
           cp .env.example .env
+          # Registry downloads sometimes get cut off mid-pull; retry before giving up.
+          for i in 1 2 3; do docker compose --profile gateway pull --quiet && break; echo "image pull failed (try $i), retrying"; sleep 20; done
           docker compose --profile gateway up -d
           for i in $(seq 1 90); do curl -sf http://localhost:11434/api/version && break; sleep 2; done
           rack status
