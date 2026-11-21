@@ -335,6 +335,7 @@ def main() -> None:
     os.chdir(work_dir)
 
     metrics: dict = {"status": "running", "name": job.get("name"), "base": job.get("base"),
+                     "job_sha256": hashlib.sha256(job_bytes).hexdigest(),
                      "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                      "where": "kaggle" if ON_KAGGLE else "local"}
     try:

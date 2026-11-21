@@ -178,6 +178,10 @@ def cmd_train(ctx: Ctx, a) -> None:
     if not a.name:
         raise RackError("Which model? rack train <name>")
     p = ctx.project(a.name)
+    if a.collect:
+        entry = runner.collect_latest_kaggle(ctx.client, ctx.root, p, ctx.cfg, notes=a.notes or "")
+        _after_new_version(ctx, p, entry, a)
+        return
     report = data.check(p.path(p.cfg["train"]["data"]), int(p.cfg["train"]["max_seq_length"]))
     if report["errors"]:
         line, why = report["errors"][0]
@@ -404,6 +408,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--backend", choices=["auto", "kaggle", "local"], help="where to train (default from model.toml)")
     sp.add_argument("--dry-run", action="store_true", help="package the job without running it")
     sp.add_argument("--resume", metavar="JOB_DIR", help="collect a job that was interrupted or ran elsewhere")
+    sp.add_argument("--collect", action="store_true",
+                    help="import the last Kaggle result for this model (no job folder needed)")
     sp.add_argument("--notes", help="what changed in this version")
     sp.add_argument("--deploy", action="store_true", help="deploy the new version right away")
     sp.add_argument("--no-eval", action="store_true", help="skip the automatic eval")

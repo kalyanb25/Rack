@@ -424,6 +424,20 @@ class TestEndToEnd(RackTestCase):
         self.assertEqual(self.reg("kt").get("v2")["train"]["examples"], 55)
         self.assertEqual(self.reg("kt").deployed, "v1")
 
+    def test_collect_latest_kaggle_result(self):
+        self.ok("new", "kc2")
+        lines = [{"messages": [{"role": "user", "content": f"q{i}"}, {"role": "assistant", "content": f"a{i}"}]}
+                 for i in range(52)]
+        (self.root / "models" / "kc2" / "data" / "train.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+        code, text = self.rack("train", "kc2", "--collect")  # nothing pushed to Kaggle yet
+        self.assertEqual(code, 1)
+        self.assertIn("No finished Kaggle training job", text)
+        self.ok("train", "kc2", "--backend", "kaggle", "--no-eval")  # v1 from a normal run
+        text = self.ok("train", "kc2", "--collect", "--no-eval")   # pick the same Kaggle result up again
+        self.assertIn("Downloading the last result", text)
+        self.assertIn("Created kc2:v2", text)
+        self.assertEqual(self.reg("kc2").get("v2")["train"]["examples"], 52)
+
     def test_train_failure_is_explained(self):
         self.ok("new", "kf")
         os.environ["FAKE_KAGGLE_FAIL"] = "1"

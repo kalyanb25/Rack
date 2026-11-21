@@ -17,6 +17,10 @@ on:
         description: Also build the prompt-only version and compare scores
         type: boolean
         default: true
+      collect_only:
+        description: Don't train; import the last finished Kaggle result for this model
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -80,10 +84,16 @@ jobs:
           rack build "$MODEL" --no-eval --notes "baseline: system prompt only"
 
       - name: Fine-tune on Kaggle's free GPU
+        env:
+          COLLECT_ONLY: ${{ inputs.collect_only }}
         run: |
           [ -n "$KAGGLE_API_TOKEN" ] || unset KAGGLE_API_TOKEN
           [ -n "$KAGGLE_KEY" ] || unset KAGGLE_KEY
-          rack train "$MODEL" --backend kaggle --no-eval --notes "GitHub Actions run $GITHUB_RUN_NUMBER"
+          if [ "$COLLECT_ONLY" = "true" ]; then
+            rack train "$MODEL" --collect --no-eval --notes "collected from Kaggle by GitHub Actions run $GITHUB_RUN_NUMBER"
+          else
+            rack train "$MODEL" --backend kaggle --no-eval --notes "GitHub Actions run $GITHUB_RUN_NUMBER"
+          fi
 
       - name: Score every version
         run: |

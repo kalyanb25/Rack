@@ -200,6 +200,35 @@ def collect(client: Ollama, job_dir: Path, project: Project, notes: str = "") ->
     return entry
 
 
+def collect_latest_kaggle(client: Ollama, root: Path, project: Project, cfg: dict, notes: str = "") -> dict:
+    """Import the last Kaggle result for this model, e.g. when the run that started it was stopped
+    (laptop closed, CI timed out) after the GPU job was already queued or running on Kaggle."""
+    k = Kaggle(cfg)
+    ref = f"{k.username}/{kernel_slug(project.name)}"
+    status = k.status(ref)
+    if status in ("queued", "running"):
+        raise RackError(f"The Kaggle job {ref} is still {status}. Collect it once it has finished.")
+    if status not in ("complete", "error", "cancel"):
+        raise RackError(f"No finished Kaggle training job found for {project.name} ({ref}). "
+                        f"Start one with `rack train {project.name}`.")
+    job_dir = prepare_job(root, project)  # same data and settings as were sent, unless you edited them since
+    meta = _load_meta(job_dir)
+    meta.update({"backend": "kaggle", "kernel": ref, "status": status, "collected": True})
+    _save_meta(job_dir, meta)
+    ui.step(f"Downloading the last result of {ref} ({status})")
+    k.download(ref, job_dir / "output")
+    mfile = job_dir / "output" / "metrics.json"
+    if mfile.is_file():
+        try:
+            ran = json.loads(mfile.read_text(encoding="utf-8")).get("job_sha256")
+        except (OSError, json.JSONDecodeError):
+            ran = None
+        if ran and ran != meta.get("job_sha256"):
+            ui.warn("That Kaggle result was trained on different data or settings than your current files; "
+                    "its training stats below describe the older job.")
+    return collect(client, job_dir, project, notes)
+
+
 def resume(client: Ollama, root: Path, job_dir: Path, cfg: dict, notes: str = "") -> dict:
     job_dir = job_dir if job_dir.is_absolute() else (Path.cwd() / job_dir)
     meta = _load_meta(job_dir)
