@@ -36,12 +36,12 @@ ON_KAGGLE = bool(os.environ.get("KAGGLE_KERNEL_RUN_TYPE")) or Path("/kaggle/work
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
-# Unsloth's tested install recipe for Kaggle (from their Kaggle-Qwen3_(4B)-Instruct notebook).
-# If Unsloth changes it, override with "install": [...] in job.json (rack: [train] install = [...]).
-# If xformers has no wheel for this Python, the first line is retried without it (Unsloth runs fine
-# without xformers).
+# Unsloth's tested install recipe for Kaggle (from their Kaggle-Qwen3_(4B)-Instruct notebook), minus
+# xformers: on Python 3.13 it loads Meta's MSLK kernels, which don't support the T4 (compute 7.5) and
+# crash Unsloth's import. Unsloth runs fine without xformers (it uses PyTorch's own attention).
+# If Unsloth changes the recipe, override with "install": [...] in job.json (rack: [train] install = [...]).
 KAGGLE_INSTALL = [
-    "pip install -q torch torchvision torchaudio xformers --index-url https://download.pytorch.org/whl/cu128",
+    "pip install -q torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128",
     "pip install -q unsloth",
     'pip install -q --no-deps --upgrade "torchao>=0.16.0"',
     "pip install -q transformers==4.57.6",
@@ -138,6 +138,23 @@ def preflight() -> None:
         raise SystemExit("This Kaggle session has no GPU. Kaggle gives GPUs only to phone-verified accounts with "
                          "weekly GPU quota left (see kaggle.com > Settings, or `kaggle quota`).")
     log("GPUs: " + gpus.replace("\n", "; "))
+
+
+# Optional GPU kernel packages that crash on import when they don't support this GPU, and what to
+# uninstall if they do. Unsloth treats them as optional, so removing a broken one is safe.
+OPTIONAL_KERNELS = {"xformers.ops": ["xformers", "mslk", "mslk-cuda"], "mslk": ["mslk", "mslk-cuda"]}
+
+
+def drop_broken_optional_kernels() -> None:
+    for module, packages in OPTIONAL_KERNELS.items():
+        if importlib.util.find_spec(module.split(".")[0]) is None:
+            continue
+        probe = subprocess.run([sys.executable, "-c", f"import {module}"], capture_output=True, text=True)
+        if probe.returncode != 0:
+            why = (probe.stderr or probe.stdout).strip().splitlines()[-1:] or ["?"]
+            log(f"{module} is installed but broken on this GPU ({why[0][:160]}); removing it")
+            sh(f'"{sys.executable}" -m pip uninstall -y -q ' + " ".join(packages))
+            importlib.invalidate_caches()
 
 
 def install_if_needed(job: dict) -> None:
@@ -345,6 +362,8 @@ def main() -> None:
         if ON_KAGGLE:
             preflight()
         install_if_needed(job)
+        if ON_KAGGLE:
+            drop_broken_optional_kernels()
         metrics.update(train(job, data_dir, out_dir, work_dir))
         metrics["status"] = "ok"
     except BaseException as e:  # record everything, including SystemExit from setup

@@ -273,6 +273,26 @@ class TestTrainScript(unittest.TestCase):
                 self.mod.install_if_needed({"install": ["pip install -q bad-package"]})
             self.assertIn("no matching distribution", str(cm.exception))
 
+    def test_removes_broken_optional_kernels(self):
+        from unittest import mock
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            if isinstance(cmd, list) and cmd[-1] == "import xformers.ops":  # the import probe fails
+                return mock.Mock(returncode=1, stdout="", stderr="OSError: Could not load this library: mslk.so")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        installed = {"xformers"}
+        with mock.patch.object(self.mod.importlib.util, "find_spec", lambda name: object() if name in installed else None), \
+             mock.patch.object(self.mod.subprocess, "run", fake_run), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.mod.drop_broken_optional_kernels()
+        uninstall = [c for c in calls if isinstance(c, str) and "uninstall" in c]
+        self.assertEqual(len(uninstall), 1)
+        self.assertIn("xformers mslk mslk-cuda", uninstall[0])
+        self.assertIn("broken on this GPU", out.getvalue())
+        self.assertNotIn("xformers", self.mod.KAGGLE_INSTALL[0])
+
     def test_refuses_stale_kaggle_data(self):
         with tempfile.TemporaryDirectory() as d:
             job = Path(d) / "data" / "job.json"
