@@ -134,9 +134,14 @@ class Kaggle:
             raise RackError(f"Kaggle rejected the job:\n{out[-1500:]}")
 
     def status(self, ref: str) -> str:
+        """complete | error | cancel | running | queued, or missing/unknown when Kaggle gave no status."""
         out = self.run("kernels", "status", ref, check=False, timeout=120)
         m = re.search(r'has status "([^"]+)"', out)
-        raw = (m.group(1) if m else out).lower()
+        if not m:  # an API error, not the job's status (its text may well contain the word "error")
+            self.last_status_output = out
+            low = out.lower()
+            return "missing" if ("404" in low or "not found" in low) else "unknown"
+        raw = m.group(1).lower()
         for key in ("complete", "error", "cancel", "running", "queued"):
             if key in raw:
                 return key
@@ -145,8 +150,13 @@ class Kaggle:
     def wait(self, ref: str, timeout_min: float, poll_s: float) -> str:
         t0 = time.monotonic()
         last = ""
+        unanswered = 0
         while True:
             s = self.status(ref)
+            unanswered = unanswered + 1 if s in ("missing", "unknown") else 0
+            if unanswered >= 10:
+                raise RackError(f"Kaggle stopped answering about {ref}. Last reply:\n"
+                                f"{getattr(self, 'last_status_output', '')[-800:]}")
             mins = int((time.monotonic() - t0) / 60)
             if s != last:
                 ui.info(f"  [{mins:3d} min] {s}")
