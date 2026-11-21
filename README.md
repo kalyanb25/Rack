@@ -115,6 +115,16 @@ Training data is chat-format JSONL. ShareGPT, prompt/response and Alpaca formats
 
 The system prompt from `system.md` is added to every example automatically, so the model learns in the same context it's served in.
 
+### What to expect
+
+Lessons from the dc-ops runs (158 examples, Qwen3-4B, free T4):
+
+- **Tone and format come fast.** dc-ops answers got about 3× shorter and more consistent.
+- **Facts don't carry over to new wording.** It learned "Velcro, not zip ties" for the question it was trained on, then missed it when asked about zip-tied fiber another way. To teach a fact, give it several examples phrased differently.
+- **Always compare with the prompt-only version.** On held-out questions dc-ops tied it, so the prompt version stays deployed. Apart from a model's first version, rack only deploys when you run `rack deploy`.
+- **Small eval sets are noisy.** With ~20 cases the same model can swing 2–3 cases between runs. Treat small gaps as a tie, and add cases before trusting a difference.
+- **Read the run summary.** Under ~20 training steps means the model barely changed. A final loss near 0.2 means it's close to memorizing its examples.
+
 ## Using your models
 
 - **Web UI:** Open WebUI at http://localhost:3000. Chats, files, model switching. It works on a phone too.
