@@ -12,7 +12,7 @@ license = {text = "MIT"}
 dependencies = ["tomli>=1.1; python_version < '3.11'"]
 
 [project.optional-dependencies]
-kaggle = ["kaggle"]
+kaggle = ["kaggle", "six"]  # kaggle 2.2.x imports six without declaring it
 
 [project.scripts]
 rack = "rack.cli:main"

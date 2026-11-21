@@ -60,7 +60,7 @@ class RackTestCase(unittest.TestCase):
         os.environ.update({"RACK_HOME": str(self.root), "RACK_OLLAMA_URL": self.fake.url,
                            "FAKE_KAGGLE_STATE": str(self.root / "_kaggle.json"), "NO_COLOR": "1",
                            "PATH": f"{self.bin}{os.pathsep}{os.environ.get('PATH', '')}"})
-        for k in ("FAKE_KAGGLE_FAIL", "FAKE_KAGGLE_CRASH", "KAGGLE_USERNAME"):
+        for k in ("FAKE_KAGGLE_FAIL", "FAKE_KAGGLE_CRASH", "FAKE_KAGGLE_MISSING_MODULE", "KAGGLE_USERNAME"):
             os.environ.pop(k, None)
 
     def tearDown(self):
@@ -410,6 +410,13 @@ class TestEndToEnd(RackTestCase):
         self.assertEqual(code, 1)
         self.assertIn("out of memory", text.lower())
         self.assertEqual(self.reg("kf").live(), [])
+
+    def test_kaggle_cli_missing_dependency_is_explained(self):
+        self.ok("new", "km")
+        os.environ["FAKE_KAGGLE_MISSING_MODULE"] = "six"
+        code, text = self.rack("train", "km", "--backend", "kaggle")
+        self.assertEqual(code, 1)
+        self.assertIn("pip install six", text)
 
     def test_train_kernel_crash_shows_logs(self):
         self.ok("new", "kc")

@@ -88,7 +88,7 @@ def resolve_backend(requested: str, cfg: dict) -> str:
         return "local"
     if shutil.which("kaggle"):
         return "kaggle"
-    raise RackError("No way to train yet. Easiest free option: `pip install kaggle`, create an API token at "
+    raise RackError("No way to train yet. Easiest free option: `pip install kaggle six`, create an API token at "
                     "kaggle.com/settings, save it as ~/.kaggle/access_token, then run this again. "
                     "Got an NVIDIA GPU? Install Unsloth and use --backend local.")
 

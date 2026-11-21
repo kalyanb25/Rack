@@ -28,7 +28,7 @@ class Kaggle:
         self.cfg = cfg["kaggle"]
         exe = shutil.which("kaggle")
         if not exe:
-            raise RackError("Kaggle CLI not found. Install it with `pip install kaggle`, then put an API token "
+            raise RackError("Kaggle CLI not found. Install it with `pip install kaggle six`, then put an API token "
                             "from kaggle.com/settings in ~/.kaggle/access_token (or set KAGGLE_API_TOKEN).")
         self.exe = exe
         self.username = self._username()
@@ -39,6 +39,11 @@ class Kaggle:
         except subprocess.TimeoutExpired as e:
             raise RackError(f"`kaggle {' '.join(args)}` timed out after {int(timeout)}s") from e
         out = ((r.stdout or "") + (r.stderr or "")).strip()
+        missing = re.search(r"No module named '([\w.]+)'", out)
+        if missing:
+            pkg = missing.group(1).split(".")[0]
+            raise RackError(f"The Kaggle CLI is missing a Python package it needs ({pkg}). "
+                            f"Fix: pip install {pkg}")
         if check and r.returncode != 0:
             raise RackError(f"`kaggle {' '.join(args)}` failed:\n{out[-2000:]}")
         return out

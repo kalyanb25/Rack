@@ -89,7 +89,7 @@ One-time setup:
 
 1. Make a [Kaggle](https://www.kaggle.com) account and verify your phone number in Settings (required for GPUs and internet access in notebooks).
 2. Settings → API → create a token. Save it to `~/.kaggle/access_token`, or set `KAGGLE_API_TOKEN`.
-3. `pip install kaggle`
+3. `pip install kaggle six` (the Kaggle tool needs `six` but doesn't install it)
 4. Put your Kaggle username in `rack.toml` under `[kaggle]`.
 
 Then:

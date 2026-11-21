@@ -155,7 +155,7 @@ def recommend(info: dict) -> dict:
     if info["disk_free_gb"] < 20:
         tips.append(f"Only {info['disk_free_gb']} GB disk free. Each model version takes 1-10 GB.")
     if train[0] == "kaggle" and not (info["kaggle"]["cli"] and info["kaggle"]["credentials"]):
-        tips.append("For free cloud training: `pip install kaggle`, then create an API token at "
+        tips.append("For free cloud training: `pip install kaggle six`, then create an API token at "
                     "kaggle.com/settings and save it as ~/.kaggle/access_token (phone-verify your account "
                     "to unlock GPUs and internet).")
     return {"budget_gb": budget, "where": where, "serve": best, "fits": fits, "train": train, "tips": tips}

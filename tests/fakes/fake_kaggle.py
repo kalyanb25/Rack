@@ -13,6 +13,9 @@ STATE = Path(os.environ["FAKE_KAGGLE_STATE"])
 s = json.loads(STATE.read_text()) if STATE.exists() else {"datasets": {}, "kernels": {}, "calls": []}
 args = sys.argv[1:]
 s["calls"].append(args)
+if os.environ.get("FAKE_KAGGLE_MISSING_MODULE"):  # like kaggle 2.2.5 without six installed
+    print(f"ModuleNotFoundError: No module named '{os.environ['FAKE_KAGGLE_MISSING_MODULE']}'", file=sys.stderr)
+    sys.exit(1)
 
 
 def out(msg, code=0):
