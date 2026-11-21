@@ -42,6 +42,7 @@ PROJECT_DEFAULTS = {
         "temperature": 0.0,
         "seed": 42,
         "think": "default",
+        "num_predict": 512,  # cap answer length so a rambling version can't stall the eval
     },
 }
 

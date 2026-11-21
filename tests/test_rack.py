@@ -319,6 +319,8 @@ class TestEndToEnd(RackTestCase):
         reg = self.reg("kal")
         self.assertEqual(reg.deployed, "v1")
         self.assertIn("eval", reg.get("v1"))
+        chat = [b for m, p, b in self.fake.state.log if p == "/api/chat"][0]
+        self.assertEqual(chat["options"]["num_predict"], 512)
         create = [b for m, p, b in self.fake.state.log if p == "/api/create"][0]
         self.assertEqual(create["from"], "qwen3:4b-instruct-2507-q4_K_M")
         self.assertIn("You are kal", create["system"])
@@ -542,6 +544,9 @@ class TestEndToEnd(RackTestCase):
         self.assertIn("Tesla T4", md)
         self.assertIn("| v2 | finetune |", md)
         self.assertIn("rack import sm path/to/sm.Q4_K_M.gguf", md)
+        self.assertEqual(mod.loss_trend({"loss_history": [{"loss": 2.0}, {"loss": 1.5}, {"loss": 1.0}]}),
+                         "2.000 → 1.000 over 3 steps")
+        self.assertEqual(mod.loss_trend({}), "n/a")
 
     def test_doctor(self):
         text = self.ok("doctor")

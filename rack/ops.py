@@ -163,6 +163,8 @@ def evaluate(client: Ollama, project: Project, spec: str | None, *, verbose: boo
     ecfg = project.cfg["eval"]
     cases = load_cases(project.path(ecfg["cases"]))
     options = {"temperature": float(ecfg.get("temperature", 0.0)), "seed": int(ecfg.get("seed", 42))}
+    if int(ecfg.get("num_predict") or 0) > 0:
+        options["num_predict"] = int(ecfg["num_predict"])
     think = {"on": True, "off": False}.get(str(ecfg.get("think", "default")).lower())
     judge = ecfg.get("judge") or ""
     if judge:

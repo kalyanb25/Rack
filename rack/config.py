@@ -33,6 +33,7 @@ ENV_OVERRIDES = {
     ("server", "api_key"): "RACK_API_KEY",
     ("server", "webui_url"): "RACK_WEBUI_URL",
     ("kaggle", "username"): "KAGGLE_USERNAME",
+    ("kaggle", "timeout_minutes"): "RACK_KAGGLE_TIMEOUT_MINUTES",
     ("local_train", "python"): "RACK_TRAIN_PYTHON",
 }
 

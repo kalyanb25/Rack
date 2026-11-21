@@ -17,6 +17,15 @@ def load(path: Path):
         return None
 
 
+def loss_trend(metrics: dict) -> str:
+    losses = [h["loss"] for h in metrics.get("loss_history") or [] if isinstance(h.get("loss"), (int, float))]
+    if len(losses) < 2:
+        return "n/a"
+    k = max(1, len(losses) // 10)
+    first, last = sum(losses[:k]) / k, sum(losses[-k:]) / k
+    return f"{first:.3f} → {last:.3f} over {len(losses)} steps"
+
+
 def main(name: str, root: Path = Path(".")) -> str:
     lines = [f"## Fine-tune: `{name}`", ""]
     metrics = load(root / "dist" / "metrics.json")
@@ -35,6 +44,7 @@ def main(name: str, root: Path = Path(".")) -> str:
             f"- Examples: {metrics.get('examples')}",
             f"- Training time: {metrics.get('train_runtime_s')} s",
             f"- Final loss: {round(loss, 4) if isinstance(loss, float) else loss}",
+            f"- Loss trend: {loss_trend(metrics)}",
             f"- Model file: `{metrics.get('gguf')}`",
         ]
         sample = metrics.get("sample")
