@@ -134,10 +134,33 @@ def _wait_and_download(k: Kaggle, job_dir: Path, cfg: dict) -> None:
         ui.warn(f"Couldn't download outputs: {e}")
     meta["status"] = status
     _save_meta(job_dir, meta)
-    if status != "complete" and not (job_dir / "output" / "metrics.json").is_file():
+    mfile = job_dir / "output" / "metrics.json"
+    if mfile.is_file():
+        try:
+            failed = json.loads(mfile.read_text(encoding="utf-8")).get("status") != "ok"
+        except (OSError, json.JSONDecodeError):
+            failed = True
+        if failed:
+            tail = k.logs_tail(ref, 30)
+            (job_dir / "kaggle-log-tail.txt").write_text(tail, encoding="utf-8")
+            if tail:
+                ui.info(ui.dim("  Last lines of the Kaggle log:\n" + "\n".join("    " + ln for ln in tail.splitlines())))
+    if status != "complete" and not mfile.is_file():
         tail = k.logs_tail(ref)
         raise RackError(f"The Kaggle job ended with status '{status}'. Last log lines:\n{tail}\n"
                         f"Full logs: https://www.kaggle.com/code/{ref}")
+
+
+def _failure_hint(error: str) -> str:
+    e = error.lower()
+    if "out of memory" in e or "outofmemory" in e:
+        return "Fix: lower max_seq_length or batch_size in [train], or use a smaller base model."
+    if "no internet" in e or "no gpu" in e or "older version" in e:
+        return ""  # the error already says what to do
+    if "pip install" in e or "failed (exit" in e:
+        return ("The job couldn't install its packages. If Unsloth changed its Kaggle recipe, copy the new "
+                "install lines into [train] install = [...] in model.toml.")
+    return "Check the base model name in model.toml, and the full log on Kaggle."
 
 
 def collect(client: Ollama, job_dir: Path, project: Project, notes: str = "") -> dict:
@@ -148,9 +171,7 @@ def collect(client: Ollama, job_dir: Path, project: Project, notes: str = "") ->
     metrics = json.loads(mpath.read_text(encoding="utf-8"))
     if metrics.get("status") != "ok":
         tb = "\n".join((metrics.get("traceback") or "").strip().splitlines()[-12:])
-        raise RackError(f"Training failed: {metrics.get('error')}\n{tb}\n"
-                        "Common fixes: smaller max_seq_length or batch_size (out of memory), "
-                        "or check the base model name in model.toml.")
+        raise RackError(f"Training failed: {metrics.get('error')}\n{tb}\n{_failure_hint(metrics.get('error') or '')}")
     job = json.loads((job_dir / "data" / "job.json").read_text(encoding="utf-8"))
     gguf = out / metrics["gguf"] if metrics.get("gguf") else None
     if not gguf or not gguf.is_file():

@@ -252,6 +252,27 @@ class TestTrainScript(unittest.TestCase):
         self.assertFalse((out / "_work").exists())
         return json.loads((out / "metrics.json").read_text())
 
+    def test_install_explains_failures_and_drops_xformers(self):
+        from unittest import mock
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            bad = "xformers" in cmd or "bad-package" in cmd
+            return mock.Mock(returncode=1 if bad else 0, stdout="", stderr="ERROR: no matching distribution" if bad else "")
+
+        with mock.patch.object(self.mod, "ON_KAGGLE", True), \
+             mock.patch.object(self.mod.importlib.util, "find_spec", lambda name: None), \
+             mock.patch.object(self.mod.subprocess, "run", fake_run), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.mod.install_if_needed({"install": ["pip install -q torch xformers --index-url X", "pip install -q unsloth"]})
+            self.assertEqual(len(calls), 3)  # torch+xformers fails, retried without xformers, then unsloth
+            self.assertNotIn("xformers", calls[1])
+            self.assertIn(sys.executable, calls[1])
+            with self.assertRaises(RuntimeError) as cm:
+                self.mod.install_if_needed({"install": ["pip install -q bad-package"]})
+            self.assertIn("no matching distribution", str(cm.exception))
+
     def test_refuses_stale_kaggle_data(self):
         with tempfile.TemporaryDirectory() as d:
             job = Path(d) / "data" / "job.json"

@@ -38,8 +38,9 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 # Unsloth's tested install recipe for Kaggle (from their Kaggle-Qwen3_(4B)-Instruct notebook).
 # If Unsloth changes it, override with "install": [...] in job.json (rack: [train] install = [...]).
+# If xformers has no wheel for this Python, the first line is retried without it (Unsloth runs fine
+# without xformers).
 KAGGLE_INSTALL = [
-    "pip install -q pip3-autoremove",
     "pip install -q torch torchvision torchaudio xformers --index-url https://download.pytorch.org/whl/cu128",
     "pip install -q unsloth",
     'pip install -q --no-deps --upgrade "torchao>=0.16.0"',
@@ -109,18 +110,53 @@ def pick_gguf(files: list, quant: str) -> Path | None:
     return min(candidates, key=lambda p: p.stat().st_size)  # quantized file is the smallest one
 
 
+def sh(cmd: str) -> None:
+    """Run a shell command; on failure raise with its real output so metrics.json explains it."""
+    log(f"$ {cmd}")
+    env = dict(os.environ, PIP_BREAK_SYSTEM_PACKAGES="1",  # Kaggle's Python is a throwaway system Python
+               PIP_DISABLE_PIP_VERSION_CHECK="1", PIP_ROOT_USER_ACTION="ignore")
+    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, env=env)
+    tail = "\n".join(((r.stdout or "") + (r.stderr or "")).strip().splitlines()[-25:])
+    if tail:
+        print(tail, flush=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"`{cmd}` failed (exit {r.returncode}):\n{tail}")
+
+
+def preflight() -> None:
+    """Fail in seconds, with a clear reason, instead of minutes into an install."""
+    import socket
+    try:
+        socket.create_connection(("pypi.org", 443), timeout=15).close()
+    except OSError as e:
+        raise SystemExit("This Kaggle session has no internet, so it can't install Unsloth or download the base "
+                         "model. Kaggle only allows internet for phone-verified accounts: kaggle.com > Settings > "
+                         f"Phone verification. Then run the training again. ({e})")
+    smi = shutil.which("nvidia-smi")
+    gpus = subprocess.run([smi, "-L"], capture_output=True, text=True).stdout.strip() if smi else ""
+    if not gpus:
+        raise SystemExit("This Kaggle session has no GPU. Kaggle gives GPUs only to phone-verified accounts with "
+                         "weekly GPU quota left (see kaggle.com > Settings, or `kaggle quota`).")
+    log("GPUs: " + gpus.replace("\n", "; "))
+
+
 def install_if_needed(job: dict) -> None:
     if importlib.util.find_spec("unsloth") is not None:
         return
     if not (ON_KAGGLE or job.get("auto_install")):
         raise SystemExit("Unsloth isn't installed in this Python. Install it first "
                          "(see https://unsloth.ai/docs) or let rack run this on Kaggle.")
-    log("installing Unsloth (takes a few minutes the first time)...")
+    log(f"installing Unsloth for Python {sys.version.split()[0]} (takes a few minutes)...")
     for cmd in job.get("install") or KAGGLE_INSTALL:
         if cmd.startswith("pip "):  # use this interpreter's pip, whatever `pip` on PATH is
             cmd = f'"{sys.executable}" -m {cmd}'
-        log(f"$ {cmd}")
-        subprocess.run(cmd, shell=True, check=True)
+        try:
+            sh(cmd)
+        except RuntimeError:
+            if " xformers" not in cmd:
+                raise
+            log("xformers didn't install for this Python; continuing without it")
+            sh(cmd.replace(" xformers", ""))
     importlib.invalidate_caches()
 
 
@@ -305,6 +341,8 @@ def main() -> None:
         if EXPECTED_JOB_SHA256 and hashlib.sha256(job_bytes).hexdigest() != EXPECTED_JOB_SHA256:
             raise SystemExit("Kaggle attached an older version of your training data (the new upload was "
                              "still processing). Nothing was trained. Run `rack train` again in a minute.")
+        if ON_KAGGLE:
+            preflight()
         install_if_needed(job)
         metrics.update(train(job, data_dir, out_dir, work_dir))
         metrics["status"] = "ok"
