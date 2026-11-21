@@ -35,14 +35,34 @@ def cell(text, n: int = 110) -> str:
     return t if len(t) <= n else t[: n - 1] + "…"
 
 
-def failed_cases(models_dir: Path) -> list[str]:
-    """Which eval cases each version failed, and why, from the latest result file per version."""
+def latest_results(models_dir: Path) -> dict[str, dict]:
+    """Newest eval result per version, oldest version first."""
     latest: dict[str, Path] = {}
     for f in sorted((models_dir / "evals" / "results").glob("v*-*.json")):
         latest[f.name.split("-", 1)[0]] = f  # names sort by timestamp, so the last one wins
+    order = sorted(latest, key=lambda v: int(v[1:]) if v[1:].isdigit() else 0)
+    return {v: load(latest[v]) or {} for v in order}
+
+
+def head_to_head(results: dict[str, dict], new: str, old: str) -> list[str]:
+    """Which cases the new version fixed and broke compared with the old one."""
+    if new == old or new not in results or old not in results:
+        return []
+    passed = {v: {c.get("id"): bool(c.get("pass")) for c in results[v].get("cases") or []} for v in (new, old)}
+    shared = passed[new].keys() & passed[old].keys()
+    fixed = sorted(i for i in shared if passed[new][i] and not passed[old][i])
+    broke = sorted(i for i in shared if passed[old][i] and not passed[new][i])
+    line = (f"**{new} vs {old}:** fixed {len(fixed)}" + (f" ({', '.join(fixed)})" if fixed else "")
+            + f", broke {len(broke)}" + (f" ({', '.join(broke)})" if broke else "") + ".")
+    note = ("A gap of one or two cases can be noise: CPU differences between runners can flip a few "
+            "answers for the very same model.")
+    return ["", line, note]
+
+
+def failed_cases(results: dict[str, dict]) -> list[str]:
+    """Which eval cases each version failed, and why."""
     rows = []
-    for version in sorted(latest, key=lambda v: int(v[1:]) if v[1:].isdigit() else 0):
-        res = load(latest[version]) or {}
+    for version, res in results.items():
         for c in res.get("cases") or []:
             if c.get("pass"):
                 continue
@@ -99,7 +119,10 @@ def main(name: str, root: Path = Path(".")) -> str:
             ev = v.get("eval")
             score = f"{round(ev['score'] * 100)}% ({ev['passed']}/{ev['total']})" if ev else "-"
             lines.append(f"| {v['version']} | {v.get('kind')} | {score} | {v.get('notes', '')} |")
-    lines += failed_cases(root / "models" / name)
+    results = latest_results(root / "models" / name)
+    if reg and reg.get("versions") and reg.get("deployed"):
+        lines += head_to_head(results, reg["versions"][-1]["version"], reg["deployed"])
+    lines += failed_cases(results)
 
     if metrics and metrics.get("status") == "ok":
         lines += ["", "### Use it on your machine",

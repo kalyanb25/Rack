@@ -583,6 +583,10 @@ class TestEndToEnd(RackTestCase):
         self.assertIn("- Loss covers: 550 of 2200 tokens (25.0%)", md)
         self.assertIn("| steps-case | v2 | must_match (numbered steps) | Power it down /first/ then pull it |", md)
         self.assertNotIn("ok-case", md)
+        res = {"v1": {"cases": [{"id": "a", "pass": False}, {"id": "b", "pass": True}, {"id": "c", "pass": True}]},
+               "v2": {"cases": [{"id": "a", "pass": True}, {"id": "b", "pass": False}, {"id": "c", "pass": True}]}}
+        self.assertEqual(mod.head_to_head(res, "v2", "v1")[1], "**v2 vs v1:** fixed 1 (a), broke 1 (b).")
+        self.assertEqual(mod.head_to_head(res, "v1", "v1"), [])
         self.assertEqual(mod.loss_trend({"loss_history": [{"loss": 2.0}, {"loss": 1.5}, {"loss": 1.0}]}),
                          "2.000 → 1.000 over 3 steps")
         self.assertEqual(mod.loss_trend({}), "n/a")
