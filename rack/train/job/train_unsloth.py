@@ -21,6 +21,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -74,6 +75,39 @@ def find_job(arg: str | None) -> Path:
                 return hits[0]
     raise SystemExit("job.json not found. Pass --job path/to/job.json "
                      "(on Kaggle, attach the rack data dataset to this notebook).")
+
+
+def plan_steps(rows: int, batch_size: int, grad_accum: int, epochs: float, max_steps: int = 0) -> int:
+    """Optimizer steps the Trainer will take, using its rounding."""
+    if max_steps > 0:
+        return max_steps
+    batches = math.ceil(rows / max(1, batch_size))
+    return max(1, math.ceil(math.ceil(batches / max(1, grad_accum)) * epochs))
+
+
+def warmup_for(steps: int) -> int:
+    """About 10% of training, at most 5 steps: a fixed 5 would eat most of a short run."""
+    return max(1, min(5, steps // 10))
+
+
+def label_stats(ds, tokenizer) -> dict | None:
+    """What the loss actually covers. Catches masking that trains on the wrong text."""
+    try:
+        if not {"input_ids", "labels"} <= set(ds.column_names):
+            return None
+        total = trained = empty = 0
+        for ex in ds:
+            n = sum(1 for t in ex["labels"] if t != -100)
+            total += len(ex["input_ids"])
+            trained += n
+            empty += n == 0
+        first = ds[0]
+        preview = tokenizer.decode([t for t, lab in zip(first["input_ids"], first["labels"]) if lab != -100])
+        return {"rows": len(ds), "tokens": total, "trained_tokens": trained,
+                "rows_without_targets": empty, "trained_preview": preview[:300]}
+    except Exception as e:  # stats are a diagnostic, never a reason to fail the run
+        log(f"couldn't count trained tokens ({e})")
+        return None
 
 
 def pick_chat_template(base: str, configured: str | None) -> str | None:
@@ -236,11 +270,19 @@ def train(job: dict, data_dir: Path, out_dir: Path, work_dir: Path) -> dict:
         eval_ds = eval_ds.map(to_text, batched=True, remove_columns=eval_ds.column_names)
     log(f"{len(train_ds)} training examples" + (f", {len(eval_ds)} validation" if eval_ds else ""))
 
+    # Packing joins short conversations into full 2048-token rows. Unsloth turns it on by default,
+    # but on a small dataset it leaves only a handful of optimizer steps, and with replies-only loss
+    # it can let a reply's loss run into the next conversation. Off unless the job asks for it.
+    packing = bool(job.get("packing", False))
+    planned = plan_steps(len(train_ds), int(job["batch_size"]), int(job["grad_accum"]),
+                         float(job["epochs"]), int(job.get("max_steps") or 0))
+    warmup = warmup_for(planned)
     cfg = dict(
         dataset_text_field="text",
+        packing=packing,
         per_device_train_batch_size=int(job["batch_size"]),
         gradient_accumulation_steps=int(job["grad_accum"]),
-        warmup_steps=5,
+        warmup_steps=warmup,
         learning_rate=float(job["learning_rate"]),
         logging_steps=1,
         optim="adamw_8bit",
@@ -265,6 +307,15 @@ def train(job: dict, data_dir: Path, out_dir: Path, work_dir: Path) -> dict:
         log("loss on assistant replies only")
     except Exception as e:
         log(f"loss on full conversations (couldn't isolate replies: {e})")
+    labels = label_stats(trainer.train_dataset, tokenizer)
+    if labels:
+        share = round(100 * labels["trained_tokens"] / max(1, labels["tokens"]), 1)
+        log(f"loss covers {labels['trained_tokens']} of {labels['tokens']} tokens ({share}%) "
+            f"in {labels['rows']} rows; packing {'on' if packing else 'off'}; ~{planned} steps, {warmup} warmup")
+        log(f"first row trains on: {labels['trained_preview'][:160]!r}")
+        if labels["rows_without_targets"]:
+            log(f"warning: {labels['rows_without_targets']} row(s) have no reply tokens left to learn "
+                f"(longer than max_seq_length?)")
 
     t0 = time.time()
     stats = trainer.train()
@@ -272,7 +323,8 @@ def train(job: dict, data_dir: Path, out_dir: Path, work_dir: Path) -> dict:
     history = [{k: h[k] for k in ("step", "epoch", "loss", "eval_loss") if k in h}
                for h in trainer.state.log_history if "loss" in h or "eval_loss" in h]
     losses = [h["loss"] for h in history if "loss" in h]
-    log(f"trained in {runtime}s, final loss {losses[-1] if losses else 'n/a'}")
+    steps = int(trainer.state.global_step)
+    log(f"trained in {runtime}s over {steps} steps, final loss {losses[-1] if losses else 'n/a'}")
 
     sample = None
     try:
@@ -320,6 +372,10 @@ def train(job: dict, data_dir: Path, out_dir: Path, work_dir: Path) -> dict:
         "train_runtime_s": runtime,
         "train_loss": getattr(stats, "training_loss", None),
         "final_loss": losses[-1] if losses else None,
+        "steps": steps,
+        "warmup_steps": warmup,
+        "packing": packing,
+        "labels": labels,
         "loss_history": history[-200:],
         "chat_template": template,
         "gguf": final.name,
@@ -341,6 +397,8 @@ def main() -> None:
     job_path = find_job(args.job).resolve()
     job_bytes = job_path.read_bytes()
     job = json.loads(job_bytes)
+    if not job.get("packing", False):
+        os.environ["UNSLOTH_DEFAULT_PACKING"] = "0"
     data_dir = job_path.parent
     out_dir = Path(args.out) if args.out else (Path("/kaggle/working") if ON_KAGGLE else Path.cwd() / "output")
     work_dir = Path("/tmp/rack-work") if ON_KAGGLE else out_dir.resolve() / "_work"

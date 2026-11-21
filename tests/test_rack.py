@@ -219,6 +219,30 @@ class TestTrainScript(unittest.TestCase):
         self.assertEqual(t("anything", "chatml"), "chatml")
         self.assertIsNone(t("some/unknown-model", "auto"))
 
+    def test_step_planning(self):
+        plan = self.mod.plan_steps
+        self.assertEqual(plan(158, 2, 4, 3), 60)     # dc-ops, one conversation per row
+        self.assertEqual(plan(18, 2, 4, 3), 9)       # the same data packed into 18 rows: what Kaggle did
+        self.assertEqual(plan(158, 2, 4, 3, max_steps=25), 25)
+        self.assertEqual(plan(1, 2, 4, 1), 1)
+        self.assertEqual([self.mod.warmup_for(n) for n in (1, 9, 30, 60, 500)], [1, 1, 3, 5, 5])
+
+    def test_label_stats(self):
+        class DS(list):
+            column_names = ["input_ids", "attention_mask", "labels"]
+
+        class Tok:
+            def decode(self, ids):
+                return " ".join(f"t{i}" for i in ids)
+
+        ds = DS([{"input_ids": [1, 2, 3, 4], "labels": [-100, -100, 3, 4]},
+                 {"input_ids": [5, 6], "labels": [-100, -100]}])
+        st = self.mod.label_stats(ds, Tok())
+        self.assertEqual((st["rows"], st["tokens"], st["trained_tokens"], st["rows_without_targets"]), (2, 6, 2, 1))
+        self.assertEqual(st["trained_preview"], "t3 t4")
+        DS.column_names = ["input_ids"]  # no labels column: nothing to report, no crash
+        self.assertIsNone(self.mod.label_stats(ds, Tok()))
+
     def test_pick_gguf(self):
         with tempfile.TemporaryDirectory() as d:
             big = Path(d) / "model.BF16.gguf"
@@ -236,9 +260,11 @@ class TestTrainScript(unittest.TestCase):
             job.parent.mkdir()
             job.write_text(json.dumps({"name": "m", "base": "unsloth/Qwen3-4B-Instruct-2507"}))
             out = Path(d) / "out"
+            os.environ.pop("UNSLOTH_DEFAULT_PACKING", None)
             metrics = self._run_main(job, out)
             self.assertEqual(metrics["status"], "error")
             self.assertIn("Unsloth isn't installed", metrics["error"])
+            self.assertEqual(os.environ.pop("UNSLOTH_DEFAULT_PACKING", None), "0")  # Unsloth packs unless told not to
 
     def _run_main(self, job: Path, out: Path) -> dict:
         argv, cwd = sys.argv, os.getcwd()
@@ -432,6 +458,7 @@ class TestEndToEnd(RackTestCase):
         self.assertEqual(first["messages"][0]["role"], "system")  # system prompt baked into training data
         job_bytes = (job_dir / "data" / "job.json").read_bytes()
         self.assertEqual(json.loads(job_bytes)["quantization"], "q4_k_m")
+        self.assertIs(json.loads(job_bytes)["packing"], False)
         import hashlib
         pushed = (job_dir / "kernel" / "train_unsloth.py").read_text()
         self.assertIn(f'EXPECTED_JOB_SHA256 = "{hashlib.sha256(job_bytes).hexdigest()}"', pushed)
@@ -540,10 +567,22 @@ class TestEndToEnd(RackTestCase):
         spec = importlib.util.spec_from_file_location("train_summary", REPO / ".github" / "scripts" / "train_summary.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        results = self.root / "models" / "sm" / "evals" / "results"
+        results.mkdir(parents=True, exist_ok=True)
+        (results / "v2-29990101-000000.json").write_text(json.dumps({"cases": [
+            {"id": "ok-case", "pass": True, "answer": "fine", "checks": []},
+            {"id": "steps-case", "pass": False, "answer": "Power it down |first|\nthen pull it",
+             "checks": [{"check": "must_match", "pass": False, "detail": "numbered steps"},
+                        {"check": "max_words", "pass": True, "detail": ""}]}]}))
         md = mod.main("sm", self.root)
         self.assertIn("Tesla T4", md)
         self.assertIn("| v2 | finetune |", md)
         self.assertIn("rack import sm path/to/sm.Q4_K_M.gguf", md)
+        self.assertIn("- Training steps: 14", md)  # 55 examples / (2 x 4) per step x 2 epochs
+        self.assertIn("**Warning:** only 14 training steps", md)
+        self.assertIn("- Loss covers: 550 of 2200 tokens (25.0%)", md)
+        self.assertIn("| steps-case | v2 | must_match (numbered steps) | Power it down /first/ then pull it |", md)
+        self.assertNotIn("ok-case", md)
         self.assertEqual(mod.loss_trend({"loss_history": [{"loss": 2.0}, {"loss": 1.5}, {"loss": 1.0}]}),
                          "2.000 → 1.000 over 3 steps")
         self.assertEqual(mod.loss_trend({}), "n/a")

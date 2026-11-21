@@ -47,6 +47,7 @@ def prepare_job(root: Path, project: Project) -> Path:
         "learning_rate": t["learning_rate"],
         "batch_size": t["batch_size"],
         "grad_accum": t["grad_accum"],
+        "packing": bool(t.get("packing", False)),
         "quantization": t["quantization"],
         "chat_template": t.get("chat_template", "auto"),
         "load_in_4bit": t.get("load_in_4bit", True),

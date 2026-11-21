@@ -31,6 +31,7 @@ PROJECT_DEFAULTS = {
         "max_seq_length": 2048,
         "batch_size": 2,
         "grad_accum": 4,
+        "packing": False,  # join short examples into full rows; only worth it on large datasets
         "quantization": "q4_k_m",
         "include_system": True,
         "chat_template": "auto",
@@ -155,6 +156,8 @@ epochs = 2
 learning_rate = 2e-4
 lora_r = 16
 max_seq_length = 2048
+packing = false               # join short examples into full rows: faster on thousands of examples,
+                              # but on a small set it leaves too few training steps
 quantization = "q4_k_m"       # GGUF quant for serving: q4_k_m (small), q5_k_m, q8_0 (best quality)
 include_system = true         # add the system prompt to training examples that don't have one
 

@@ -4,6 +4,7 @@ Simulates: config view, datasets status/create/version, kernels push/status/outp
 Env: FAKE_KAGGLE_STATE (json state file), FAKE_KAGGLE_FAIL (training error), FAKE_KAGGLE_CRASH (kernel error).
 """
 import json
+import math
 import os
 import sys
 import zipfile
@@ -38,8 +39,12 @@ def write_outputs(dest: Path, data_dir: Path):
     # Like Unsloth's Qwen3-2507 Modelfile: a template but no PARAMETER lines.
     (dest / "Modelfile").write_text('FROM ./x.gguf\nTEMPLATE """{{ if .System }}<|im_start|>system\n'
                                     '{{ .System }}<|im_end|>{{ end }}"""\n')
+    steps = math.ceil(math.ceil(n / job["batch_size"]) / job["grad_accum"]) * math.ceil(job["epochs"])
     (dest / "metrics.json").write_text(json.dumps({
         "status": "ok", "gpu": "Tesla T4", "examples": n, "train_runtime_s": 321.5, "final_loss": 0.8123,
+        "steps": steps, "packing": job.get("packing", False),
+        "labels": {"rows": n, "tokens": 40 * n, "trained_tokens": 10 * n, "rows_without_targets": 0,
+                   "trained_preview": "a0<|im_end|>\n"},
         "gguf": name, "sample": {"prompt": "hi", "answer": "hello"}}))
     with zipfile.ZipFile(dest / "lora_adapter.zip", "w") as z:
         z.writestr("adapter_config.json", "{}")
