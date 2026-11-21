@@ -33,18 +33,27 @@ jobs:
     env:
       NO_COLOR: "1"
       MODEL: ${{ inputs.model }}
-      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME || vars.KAGGLE_USERNAME }}
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
     steps:
       - name: Check Kaggle secrets
+        id: secrets
         run: |
-          if [ -z "$KAGGLE_USERNAME" ] || { [ -z "$KAGGLE_API_TOKEN" ] && [ -z "$KAGGLE_KEY" ]; }; then
-            echo "::error::Add the KAGGLE_USERNAME and KAGGLE_API_TOKEN repository secrets first (Settings > Secrets and variables > Actions)."
+          missing=""
+          [ -n "$KAGGLE_USERNAME" ] || missing="$missing KAGGLE_USERNAME"
+          [ -n "$KAGGLE_API_TOKEN$KAGGLE_KEY" ] || missing="$missing KAGGLE_API_TOKEN"
+          if [ -n "$missing" ]; then
+            where="Settings > Secrets and variables > Actions > Secrets tab > New repository secret"
+            echo "::error::GitHub Actions can't see:$missing. Add them under $where (not the Variables tab, an Environment, Codespaces or Dependabot)."
+            {
+              echo "## Kaggle secrets missing"
+              echo "This run can't see:**$missing**."
+              echo "Add them as **repository secrets**: $where."
+              echo "Not the Variables tab, an Environment, Codespaces or Dependabot. Names must match exactly."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
-          [ -n "$KAGGLE_API_TOKEN" ] || unset KAGGLE_API_TOKEN
-          [ -n "$KAGGLE_KEY" ] || unset KAGGLE_KEY
 
       - name: Free disk space for model files
         run: |
@@ -82,7 +91,7 @@ jobs:
           rack versions "$MODEL"
 
       - name: Collect the model files
-        if: always()
+        if: always() && steps.secrets.outcome == 'success'
         run: |
           mkdir -p dist
           out=$(ls -d .rack/jobs/"$MODEL"-*/output 2>/dev/null | tail -1 || true)
@@ -92,11 +101,11 @@ jobs:
           ls -la dist
 
       - name: Summary
-        if: always()
+        if: always() && steps.secrets.outcome == 'success'
         run: python .github/scripts/train_summary.py "$MODEL" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the fine-tuned model
-        if: always()
+        if: always() && steps.secrets.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: ${{ inputs.model }}-finetune-run${{ github.run_number }}
